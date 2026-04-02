@@ -1,4 +1,4 @@
-console.log('PoseGuide app.js v18 - 修復 iPhone 貼上黑底問題');
+console.log('PoseGuide app.js v19 - 完美洪水填充去黑底版');
 
 const uploadScreen = document.getElementById('upload-screen');
 const loadingMsg = document.getElementById('loading-msg');
@@ -54,7 +54,7 @@ async function initTFJS() {
 }
 initTFJS();
 
-// ====== 🔥 2. 去除 iPhone 貼上產生的黑底 ======
+// ====== 🔥 2. 智慧邊緣去黑底魔法 (Flood Fill 演算法) ======
 function removeBlackBackground(imgElement) {
   return new Promise((resolve) => {
     const tempCanvas = document.createElement('canvas');
@@ -62,24 +62,54 @@ function removeBlackBackground(imgElement) {
     tempCanvas.height = imgElement.height;
     const tempCtx = tempCanvas.getContext('2d');
     
-    // 畫上原本有黑底的圖
     tempCtx.drawImage(imgElement, 0, 0);
     const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     const data = imgData.data;
+    const width = tempCanvas.width;
+    const height = tempCanvas.height;
 
-    // 掃描所有像素
-    for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i+1];
-      let b = data[i+2];
-      
-      // 如果非常接近純黑色 (RGB 都在 15 以下)，就把它變透明
-      // 這裡容差設 15，避免去太乾淨導致黑色頭髮被挖洞，也可確保黑底被去除
-      if (r < 15 && g < 15 && b < 15) {
-        data[i+3] = 0; // Alpha 設為 0 (透明)
-      }
+    // 記錄已處理過的像素，避免重複計算
+    const visited = new Uint8Array(width * height);
+    // 使用一維陣列當作堆疊 [x1, y1, x2, y2...]，效能最高
+    const stack = [];
+
+    // 判斷是否為「可消除的黑底」 (容差設25，涵蓋壓縮產生的深灰色)
+    function isBlack(x, y) {
+      if (x < 0 || x >= width || y < 0 || y >= height) return false;
+      const idx = (y * width + x) * 4;
+      return data[idx] < 25 && data[idx+1] < 25 && data[idx+2] < 25;
     }
-    
+
+    // 將圖片的四個邊緣的黑色像素加入擴散起點
+    for (let x = 0; x < width; x++) {
+      if (isBlack(x, 0)) stack.push(x, 0);
+      if (isBlack(x, height - 1)) stack.push(x, height - 1);
+    }
+    for (let y = 0; y < height; y++) {
+      if (isBlack(0, y)) stack.push(0, y);
+      if (isBlack(width - 1, y)) stack.push(width - 1, y);
+    }
+
+    // 執行洪水擴散
+    while (stack.length > 0) {
+      const py = stack.pop(); // y 座標
+      const px = stack.pop(); // x 座標
+      const pixelIndex = py * width + px;
+
+      if (visited[pixelIndex]) continue;
+      visited[pixelIndex] = 1;
+
+      // 把背景黑色變透明
+      const dataIndex = pixelIndex * 4;
+      data[dataIndex + 3] = 0;
+
+      // 檢查周圍四個方向，如果是黑色就繼續擴散
+      if (px + 1 < width && !visited[py * width + px + 1] && isBlack(px + 1, py)) stack.push(px + 1, py);
+      if (px - 1 >= 0 && !visited[py * width + px - 1] && isBlack(px - 1, py)) stack.push(px - 1, py);
+      if (py + 1 < height && !visited[(py + 1) * width + px] && isBlack(px, py + 1)) stack.push(px, py + 1);
+      if (py - 1 >= 0 && !visited[(py - 1) * width + px] && isBlack(px, py - 1)) stack.push(px, py - 1);
+    }
+
     tempCtx.putImageData(imgData, 0, 0);
     resolve(tempCanvas.toDataURL('image/png'));
   });
@@ -94,13 +124,12 @@ function processImageBlob(blob) {
   tempImg.src = URL.createObjectURL(blob);
   
   tempImg.onload = async () => {
-    // 呼叫去黑底魔法
-    setStatus('過濾黑底邊緣...');
+    setStatus('過濾黑底邊緣 (保護頭髮)...');
+    // 呼叫全新的洪水填充演算法
     const transparentDataUrl = await removeBlackBackground(tempImg);
     
     idolImg.src = transparentDataUrl;
     idolImg.onload = async () => {
-      // 瞬間抽取骨架
       const poses = await poseDetector.estimatePoses(idolImg);
       if (poses.length > 0) {
         targetPosesList = poses;
@@ -112,14 +141,13 @@ function processImageBlob(blob) {
   };
 }
 
-// 支援一：讀取剪貼簿 (加入嚴格的錯誤捕捉)
+// 支援一：讀取剪貼簿
 pasteBtn.onclick = async () => {
   try {
     if (!navigator.clipboard) {
       alert("您的瀏覽器不支援直接貼上，請使用下方『從相簿選擇』");
       return;
     }
-    
     const clipboardItems = await navigator.clipboard.read();
     let imageFound = false;
 
@@ -133,17 +161,14 @@ pasteBtn.onclick = async () => {
         break;
       }
     }
-    
-    if (!imageFound) {
-      alert("❌ 剪貼簿內沒有圖片！請先去相簿長按人像 -> 點擊『拷貝』。");
-    }
+    if (!imageFound) alert("❌ 剪貼簿內沒有圖片！請先去相簿長按人像 -> 點擊『拷貝』。");
   } catch (err) {
     alert("❌ 無法讀取剪貼簿！請確認已允許網頁存取剪貼簿，或使用下方按鈕上傳。");
     console.error(err);
   }
 };
 
-// 傳統檔案上傳 (備用)
+// 傳統檔案上傳
 fileInput.onchange = (e) => {
   if (e.target.files[0]) processImageBlob(e.target.files[0]);
 };
@@ -216,7 +241,6 @@ async function renderLoop() {
   
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // 畫處理好的無黑底去背照片
   ctx.save();
   ctx.translate(idolX, idolY); ctx.scale(idolScale, idolScale);
   ctx.globalAlpha = 0.85; 
@@ -226,7 +250,6 @@ async function renderLoop() {
 
   targetPosesList.forEach(targetPose => {
     drawKeypointsAndBones(targetPose.keypoints, 'rgba(255, 215, 0, 0.6)', 4, idolX, idolY, idolScale);
-    
     let shoulderDist = Math.abs(targetPose.keypoints[5].x - targetPose.keypoints[6].x) * idolScale;
     let partnerOffsetX = idolX + (shoulderDist * 1.8); 
     drawKeypointsAndBones(targetPose.keypoints, 'rgba(0, 255, 0, 0.8)', 6, partnerOffsetX, idolY, idolScale);
