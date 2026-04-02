@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PoseGuide - 與偶像同框</title>
+  <title>PoseGuide - AR 攝影師模式</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
   
+  <!-- 引入 TFJS、PoseDetection (骨架) 以及 BodySegmentation (去背) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
 
   <style>
     body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; color: white; }
-    /* 改用 contain 避免拖曳座標產生視覺誤差 */
     #video, #output { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; display: none; }
-    #output { z-index: 1; touch-action: none; /* 防止滑動網頁 */ }
+    #output { z-index: 1; touch-action: none; }
     
     #upload-screen {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 20;
@@ -46,12 +46,6 @@
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; 
       background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 14px; white-space: nowrap; pointer-events: none;
     }
-    
-    #countdown {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 15;
-      font-size: 150px; font-weight: bold; color: white; text-shadow: 0 0 20px #e83e8c; display: none; pointer-events: none;
-    }
-
     #flash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: white; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.1s; }
 
     #preview-modal {
@@ -66,8 +60,8 @@
 </head>
 <body>
   <div id="upload-screen">
-    <h1>與偶像同框 AR</h1>
-    <p id="loading-msg">⏳ 正在下載 AI 模組...</p>
+    <h1>與偶像同框 AR (攝影師版)</h1>
+    <p id="loading-msg">⏳ 正在下載 骨架與去背 AI 模組...</p>
     <label id="upload-label" style="display:none;">
       選擇偶像照片
       <input type="file" id="file-input" accept="image/*">
@@ -75,7 +69,6 @@
   </div>
 
   <div id="status" style="display:none;">載入中...</div>
-  <div id="countdown">3</div>
   <div id="flash"></div>
   
   <img id="idol-img" crossorigin="anonymous">
@@ -84,14 +77,14 @@
   
   <div class="btn-container">
     <button id="cancelBtn">重選照片</button>
-    <button id="takePhotoBtn">📸 拍照 (3秒)</button>
+    <button id="takePhotoBtn">📸 立即拍照</button>
   </div>
 
   <div id="preview-modal">
     <img id="preview-img" src="" alt="Photo Preview">
     <div class="preview-btns">
-      <button id="retryBtn">取消</button>
-      <button id="saveBtn">儲存合成照</button>
+      <button id="retryBtn">捨棄</button>
+      <button id="saveBtn">儲存相片</button>
     </div>
   </div>
 
