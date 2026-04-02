@@ -1,4 +1,4 @@
-console.log('PoseGuide app.js v13 - 高畫質去背引擎與伴侶綠線');
+console.log('PoseGuide app.js v14 - 高畫質去背與模型 CDN 修復');
 
 const uploadScreen = document.getElementById('upload-screen');
 const loadingMsg = document.getElementById('loading-msg');
@@ -26,7 +26,7 @@ let lastPhotoBlob = null;
 let isPreviewing = false;
 let isTracking = false;
 
-// 拖曳參數
+// 偶像圖片變換參數
 let idolX = 0, idolY = 0, idolScale = 1;
 let isDragging = false;
 let dragStartX = 0, dragStartY = 0;
@@ -57,15 +57,18 @@ fileInput.onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   
-  setStatus('1/2 啟動精準去背魔法 (需要幾秒鐘)...');
+  setStatus('啟動精準去背魔法 (首次需下載模型，請稍候)...');
   uploadScreen.style.display = 'none'; cancelBtn.style.display = 'block';
   
   try {
-    // 呼叫 imgly 去背引擎 (處理頭髮與邊緣非常完美)
+    // 呼叫 imgly 去背引擎，並強制指定模型 CDN 來源
     const imageBlob = await imglyRemoveBackground(file, {
+      // 確保跨域下載模型檔案不會失敗
+      publicPath: 'https://unpkg.com/@imgly/background-removal@1.4.3/dist/',
+      model: 'isnet_fp16', // 使用輕量快速版模型 (約 40MB)
       progress: (key, current, total) => {
         const percent = Math.round((current / total) * 100);
-        setStatus(`去背處理中: ${percent}%`);
+        setStatus(`去背中: ${percent}% (首次下載可能需 10~30 秒)`);
       }
     });
 
@@ -73,13 +76,13 @@ fileInput.onchange = async (e) => {
     idolImg.src = url;
     
     idolImg.onload = async () => {
-      setStatus('2/2 擷取偶像姿勢中...');
+      setStatus('擷取偶像姿勢中...');
       const poses = await poseDetector.estimatePoses(idolImg);
       if (poses.length > 0) {
         targetPosesList = poses;
         startCamera();
       } else {
-        setStatus('❌ 找不到骨架，請換一張全身照片'); setTimeout(resetApp, 2000);
+        setStatus('❌ 找不到人像骨架，請換一張全身照片'); setTimeout(resetApp, 2000);
       }
     };
   } catch (err) {
@@ -159,7 +162,7 @@ async function renderLoop() {
   // 1. 底層相機
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // 2. 表層偶像 (高畫質去背圖，85% 透明度方便對位)
+  // 2. 表層偶像 (去背圖)
   ctx.save();
   ctx.translate(idolX, idolY); ctx.scale(idolScale, idolScale);
   ctx.globalAlpha = 0.85; 
