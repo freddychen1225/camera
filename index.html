@@ -3,42 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PoseGuide PWA - 多人引導</title>
+  <title>PoseGuide - 與偶像同框</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
   
-  <!-- 引入 TensorFlow.js 和 Pose Detection 模組 -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
 
   <style>
-    body { margin: 0; font-family: sans-serif; background: #000; overflow: hidden; }
+    body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; color: white; }
     #video, #output { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; display: none; }
     #output { z-index: 1; }
     
+    /* 上傳照片專區 */
+    #upload-screen {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 20;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    }
+    #upload-screen h1 { margin-bottom: 30px; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+    #upload-label {
+      background: white; color: #007bff; padding: 15px 40px; border-radius: 50px;
+      font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    input[type="file"] { display: none; }
+    
+    /* 隱藏的原圖 Image 元件 (供 Canvas 繪圖用) */
+    #idol-img { display: none; }
+
     .btn-container {
       position: fixed; z-index: 10; bottom: 30px; left: 0; width: 100%;
       display: flex; justify-content: center; gap: 15px; padding: 0 15px; box-sizing: border-box;
     }
     button { 
-      padding: 12px 20px; background: #007bff; color: white; border: none; 
+      padding: 12px 20px; background: #dc3545; color: white; border: none; 
       border-radius: 50px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-      white-space: nowrap;
     }
-    button:disabled { background: #555; color: #999; }
     #guideBtn { background: #28a745; display: none; }
     
     #status { 
-      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-      color: white; z-index: 10; background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px;
-      font-size: 14px; white-space: nowrap; pointer-events: none;
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; 
+      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 14px;
     }
     #match-score {
-      position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
-      color: white; z-index: 10; background: rgba(255,165,0,0.8); padding: 8px 16px; border-radius: 20px;
-      font-size: 16px; font-weight: bold; display: none; pointer-events: none;
+      position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 10; 
+      background: rgba(255,165,0,0.8); padding: 8px 16px; border-radius: 20px; font-size: 16px; font-weight: bold; display: none;
     }
     #flash {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -46,9 +57,8 @@
     }
 
     #preview-modal {
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.9); z-index: 10000; display: none;
-      flex-direction: column; align-items: center; justify-content: center;
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.9); z-index: 10000; 
+      display: none; flex-direction: column; align-items: center; justify-content: center;
     }
     #preview-img { max-width: 90%; max-height: 70vh; border: 3px solid white; border-radius: 10px; object-fit: contain; }
     .preview-btns { margin-top: 20px; display: flex; gap: 20px; }
@@ -57,31 +67,36 @@
   </style>
 </head>
 <body>
-  <div id="status">正在下載 TFJS MoveNet 多人模組...</div>
+  <!-- 首頁：上傳照片 -->
+  <div id="upload-screen">
+    <h1>與偶像同框 AR</h1>
+    <p id="loading-msg">⏳ 正在下載 AI 模組...</p>
+    <label id="upload-label" style="display:none;">
+      選擇照片 / 拍照
+      <input type="file" id="file-input" accept="image/*">
+    </label>
+  </div>
+
+  <div id="status" style="display:none;">載入中...</div>
   <div id="match-score">匹配度: 0%</div>
   <div id="flash"></div>
   
+  <img id="idol-img" crossorigin="anonymous">
   <video id="video" autoplay playsinline webkit-playsinline muted></video>
   <canvas id="output"></canvas>
   
   <div class="btn-container">
-    <button id="start" disabled>等待載入...</button>
-    <button id="capture1" disabled>鎖定背景與姿勢</button>
-    <button id="guideBtn">進入引導模式</button>
+    <button id="cancelBtn" style="display:none;">取消重選</button>
   </div>
 
   <div id="preview-modal">
     <img id="preview-img" src="" alt="Photo Preview">
     <div class="preview-btns">
-      <button id="retryBtn">取消</button>
-      <button id="saveBtn">儲存至相簿</button>
+      <button id="retryBtn">重拍</button>
+      <button id="saveBtn">儲存合成照</button>
     </div>
   </div>
 
-  <script>
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.error);
-  </script>
-  <!-- 注意：改回一般的 script，不再使用 module -->
   <script src="./app.js"></script>
 </body>
 </html>
