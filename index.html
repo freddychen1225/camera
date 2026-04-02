@@ -3,15 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PoseGuide - AR 攝影師模式</title>
+  <title>PoseGuide - 神速貼上版</title>
   <link rel="manifest" href="./manifest.json">
   
-  <!-- 引入 TFJS、PoseDetection (骨架) 以及 BodySegmentation (去背) -->
+  <!-- 現在只需要 TFJS 與 MoveNet (處理骨架)，不需任何去背套件！ -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
 
   <style>
     body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; color: white; }
@@ -23,10 +22,23 @@
       display: flex; flex-direction: column; justify-content: center; align-items: center;
       background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
     }
-    #upload-screen h1 { margin-bottom: 30px; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+    #upload-screen h1 { margin-bottom: 10px; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+    
+    .instruction {
+      background: rgba(0,0,0,0.4); padding: 15px 25px; border-radius: 15px;
+      margin-bottom: 30px; text-align: center; line-height: 1.6; font-size: 16px;
+    }
+    
+    #action-btns { display: none; flex-direction: column; gap: 20px; align-items: center; }
+    
+    #pasteBtn {
+      background: #28a745; color: white; padding: 18px 40px; border-radius: 50px;
+      font-size: 20px; font-weight: bold; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer;
+    }
+    
     #upload-label {
-      background: white; color: #007bff; padding: 15px 40px; border-radius: 50px;
-      font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      background: white; color: #007bff; padding: 12px 30px; border-radius: 50px;
+      font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     input[type="file"] { display: none; }
     #idol-img { display: none; }
@@ -35,8 +47,8 @@
       position: fixed; z-index: 10; bottom: 30px; left: 0; width: 100%;
       display: flex; justify-content: center; gap: 15px; padding: 0 15px; box-sizing: border-box;
     }
-    button { 
-      padding: 15px 25px; background: #007bff; color: white; border: none; 
+    button.bottom-btn { 
+      padding: 15px 25px; color: white; border: none; 
       border-radius: 50px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     #takePhotoBtn { background: #e83e8c; display: none; }
@@ -54,18 +66,29 @@
     }
     #preview-img { max-width: 90%; max-height: 70vh; border: 3px solid white; border-radius: 10px; object-fit: contain; }
     .preview-btns { margin-top: 20px; display: flex; gap: 20px; }
-    #saveBtn { background: #28a745; padding: 15px 30px; font-size: 18px; }
-    #retryBtn { background: #dc3545; padding: 15px 30px; font-size: 18px; }
+    .preview-btns button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; font-weight: bold; color: white; }
+    #saveBtn { background: #28a745; }
+    #retryBtn { background: #dc3545; }
   </style>
 </head>
 <body>
   <div id="upload-screen">
-    <h1>與偶像同框 AR (羽化去背版)</h1>
-    <p id="loading-msg">⏳ 正在下載 骨架與去背 AI 模組...</p>
-    <label id="upload-label" style="display:none;">
-      選擇偶像照片
-      <input type="file" id="file-input" accept="image/*">
-    </label>
+    <h1>與偶像同框 AR</h1>
+    <div class="instruction">
+      💡 <b>神速密技：</b><br>
+      1. 到 iPhone 相簿長按偶像，點擊「拷貝」<br>
+      2. 回到本畫面，點擊下方「貼上去背照片」
+    </div>
+    
+    <p id="loading-msg">⏳ 正在下載骨架 AI 模組...</p>
+    
+    <div id="action-btns">
+      <button id="pasteBtn">📋 貼上去背照片</button>
+      <label id="upload-label">
+        📁 或從相簿選擇檔案
+        <input type="file" id="file-input" accept="image/*">
+      </label>
+    </div>
   </div>
 
   <div id="status" style="display:none;">載入中...</div>
@@ -76,8 +99,8 @@
   <canvas id="output"></canvas>
   
   <div class="btn-container">
-    <button id="cancelBtn">重選照片</button>
-    <button id="takePhotoBtn">📸 立即拍照</button>
+    <button id="cancelBtn" class="bottom-btn">重選/重貼</button>
+    <button id="takePhotoBtn" class="bottom-btn">📸 立即拍照</button>
   </div>
 
   <div id="preview-modal">
