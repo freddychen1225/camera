@@ -1,4 +1,4 @@
-console.log('PoseGuide app.js v17 - iPhone 拷貝貼上直出版');
+console.log('PoseGuide app.js v18 - 修復 iPhone 貼上黑底問題');
 
 const uploadScreen = document.getElementById('upload-screen');
 const loadingMsg = document.getElementById('loading-msg');
@@ -39,7 +39,7 @@ const POSE_CONNECTIONS = [
   [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
 ];
 
-// ====== 1. 初始化 AI (現在只剩下超輕量的骨架模型！) ======
+// ====== 1. 初始化 AI ======
 async function initTFJS() {
   try {
     await tf.ready();
@@ -54,65 +54,101 @@ async function initTFJS() {
 }
 initTFJS();
 
-// ====== 2. 核心功能：接收圖片並解析 ======
+// ====== 🔥 2. 去除 iPhone 貼上產生的黑底 ======
+function removeBlackBackground(imgElement) {
+  return new Promise((resolve) => {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imgElement.width; 
+    tempCanvas.height = imgElement.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 畫上原本有黑底的圖
+    tempCtx.drawImage(imgElement, 0, 0);
+    const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const data = imgData.data;
+
+    // 掃描所有像素
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i];
+      let g = data[i+1];
+      let b = data[i+2];
+      
+      // 如果非常接近純黑色 (RGB 都在 15 以下)，就把它變透明
+      // 這裡容差設 15，避免去太乾淨導致黑色頭髮被挖洞，也可確保黑底被去除
+      if (r < 15 && g < 15 && b < 15) {
+        data[i+3] = 0; // Alpha 設為 0 (透明)
+      }
+    }
+    
+    tempCtx.putImageData(imgData, 0, 0);
+    resolve(tempCanvas.toDataURL('image/png'));
+  });
+}
+
+// ====== 3. 處理圖片核心 ======
 function processImageBlob(blob) {
-  setStatus('處理圖片與姿勢中...');
+  setStatus('處理圖片中...');
   uploadScreen.style.display = 'none'; cancelBtn.style.display = 'block';
   
-  idolImg.src = URL.createObjectURL(blob);
-  idolImg.onload = async () => {
-    // 瞬間抽取骨架 (因為已經去背了，只剩下人像)
-    const poses = await poseDetector.estimatePoses(idolImg);
-    if (poses.length > 0) {
-      targetPosesList = poses;
-      startCamera();
-    } else {
-      setStatus('❌ 找不到人像骨架，請重試'); setTimeout(resetApp, 2000);
-    }
+  const tempImg = new Image();
+  tempImg.src = URL.createObjectURL(blob);
+  
+  tempImg.onload = async () => {
+    // 呼叫去黑底魔法
+    setStatus('過濾黑底邊緣...');
+    const transparentDataUrl = await removeBlackBackground(tempImg);
+    
+    idolImg.src = transparentDataUrl;
+    idolImg.onload = async () => {
+      // 瞬間抽取骨架
+      const poses = await poseDetector.estimatePoses(idolImg);
+      if (poses.length > 0) {
+        targetPosesList = poses;
+        startCamera();
+      } else {
+        setStatus('❌ 找不到人像骨架，請重試'); setTimeout(resetApp, 2000);
+      }
+    };
   };
 }
 
-// 支援一：讀取剪貼簿 (iPhone 拷貝貼上)
+// 支援一：讀取剪貼簿 (加入嚴格的錯誤捕捉)
 pasteBtn.onclick = async () => {
   try {
-    // 呼叫瀏覽器原生剪貼簿 API，iOS 第一次會詢問「允許貼上」
+    if (!navigator.clipboard) {
+      alert("您的瀏覽器不支援直接貼上，請使用下方『從相簿選擇』");
+      return;
+    }
+    
     const clipboardItems = await navigator.clipboard.read();
+    let imageFound = false;
+
     for (const clipboardItem of clipboardItems) {
       const imageTypes = clipboardItem.types.filter(type => type.startsWith('image/'));
       if (imageTypes.length > 0) {
-        // iPhone 去背複製出來的圖一定是透明 PNG
+        imageFound = true;
         const type = imageTypes.includes('image/png') ? 'image/png' : imageTypes[0];
         const blob = await clipboardItem.getType(type);
         processImageBlob(blob);
-        return;
+        break;
       }
     }
-    setStatus('❌ 剪貼簿內沒有圖片！請先去相簿長按拷貝。');
-    setTimeout(() => status.style.display='none', 3000);
+    
+    if (!imageFound) {
+      alert("❌ 剪貼簿內沒有圖片！請先去相簿長按人像 -> 點擊『拷貝』。");
+    }
   } catch (err) {
-    setStatus('❌ 無法讀取剪貼簿 (請確認允許存取權限)');
-    setTimeout(() => status.style.display='none', 3000);
+    alert("❌ 無法讀取剪貼簿！請確認已允許網頁存取剪貼簿，或使用下方按鈕上傳。");
     console.error(err);
   }
 };
 
-// 支援二：全域監聽貼上事件 (部分瀏覽器支援)
-window.addEventListener('paste', e => {
-  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-  for (let item of items) {
-    if (item.type.indexOf('image') === 0) {
-      processImageBlob(item.getAsFile());
-      return;
-    }
-  }
-});
-
-// 支援三：傳統檔案上傳 (備用)
+// 傳統檔案上傳 (備用)
 fileInput.onchange = (e) => {
   if (e.target.files[0]) processImageBlob(e.target.files[0]);
 };
 
-// ====== 3. 畫面縮放與觸控邏輯 ======
+// ====== 4. 畫面縮放與觸控邏輯 ======
 function resizeCanvas() {
   if (video.videoWidth > 0) {
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
@@ -136,7 +172,7 @@ canvas.addEventListener('touchmove', e => {
 });
 canvas.addEventListener('touchend', () => { isDragging = false; initialPinchDist = null; });
 
-// ====== 4. 啟動相機 ======
+// ====== 5. 啟動相機 ======
 async function startCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
@@ -147,7 +183,7 @@ async function startCamera() {
       resizeCanvas();
       video.play().then(() => {
         takePhotoBtn.style.display = 'block';
-        setStatus('攝影師模式：請指揮被拍者對齊「綠色目標線」！');
+        setStatus('攝影師：請指揮對齊「綠色目標線」！');
         isTracking = true; renderLoop(); 
       });
     };
@@ -170,7 +206,7 @@ function drawKeypointsAndBones(keypoints, color, lineWidth, offsetX, offsetY, sc
   }
 }
 
-// ====== 5. 核心迴圈 ======
+// ====== 6. 核心迴圈 ======
 async function renderLoop() {
   if (!isTracking || isPreviewing || video.readyState < 2) { requestAnimationFrame(renderLoop); return; }
   const poses = await poseDetector.estimatePoses(video);
@@ -180,7 +216,7 @@ async function renderLoop() {
   
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // 畫已貼上的 iPhone 去背照片 (維持85%透明度好對位)
+  // 畫處理好的無黑底去背照片
   ctx.save();
   ctx.translate(idolX, idolY); ctx.scale(idolScale, idolScale);
   ctx.globalAlpha = 0.85; 
@@ -188,7 +224,6 @@ async function renderLoop() {
   ctx.globalAlpha = 1.0;
   ctx.restore();
 
-  // 畫黃線與伴侶綠線
   targetPosesList.forEach(targetPose => {
     drawKeypointsAndBones(targetPose.keypoints, 'rgba(255, 215, 0, 0.6)', 4, idolX, idolY, idolScale);
     
@@ -197,7 +232,6 @@ async function renderLoop() {
     drawKeypointsAndBones(targetPose.keypoints, 'rgba(0, 255, 0, 0.8)', 6, partnerOffsetX, idolY, idolScale);
   });
 
-  // 畫被拍者即時骨架
   if (poses && poses.length > 0) {
     poses.forEach(pose => {
       if (pose.score > 0.2) drawKeypointsAndBones(pose.keypoints, '#00FFFF', 3, 0, 0, 1);
@@ -207,7 +241,7 @@ async function renderLoop() {
   requestAnimationFrame(renderLoop);
 }
 
-// ====== 6. 立即拍照合成 ======
+// ====== 7. 立即拍照合成 ======
 takePhotoBtn.onclick = () => {
   isPreviewing = true;
   flash.style.opacity = '1';
@@ -220,7 +254,7 @@ takePhotoBtn.onclick = () => {
   tCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
   tCtx.save();
   tCtx.translate(idolX, idolY); tCtx.scale(idolScale, idolScale);
-  tCtx.drawImage(idolImg, 0, 0); // 100% 合成
+  tCtx.drawImage(idolImg, 0, 0); 
   tCtx.restore();
   
   tempCanvas.toBlob((blob) => {
