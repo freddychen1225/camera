@@ -1,4 +1,4 @@
-console.log('PoseGuide app.js v4 載入！(強化 iOS PWA 相容性)');
+console.log('PoseGuide app.js v5 - 加入 MediaPipe AI');
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('output');
@@ -8,45 +8,69 @@ const capture1Btn = document.getElementById('capture1');
 const status = document.getElementById('status');
 
 let stream = null;
-let drawing = false;
+let targetLandmarks = null;
+let isCapturing = false;
 
 function setStatus(msg) {
   status.textContent = msg;
-  console.log('狀態:', msg);
 }
 
+// ====== 初始化 MediaPipe Pose ======
+const pose = new Pose({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+});
+
+pose.setOptions({
+  modelComplexity: 0, // 0 最快，適合手機
+  smoothLandmarks: true,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
+});
+
+pose.onResults(onPoseResults);
+
+function onPoseResults(results) {
+  // 把相機畫面畫到底層
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+  // 如果偵測到人體，畫出骨架虛擬線
+  if (results.poseLandmarks) {
+    drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+    drawLandmarks(ctx, results.poseLandmarks, {color: '#FF0000', lineWidth: 2, radius: 2});
+    
+    // 如果按下「鎖定完美姿勢」按鈕，就把這組骨架存起來
+    if (isCapturing) {
+      targetLandmarks = JSON.parse(JSON.stringify(results.poseLandmarks));
+      localStorage.setItem('targetPose', JSON.stringify(targetLandmarks));
+      setStatus('✅ 姿勢已鎖定！準備進入引導模式');
+      capture1Btn.textContent = '已鎖定姿勢';
+      capture1Btn.disabled = true;
+      isCapturing = false;
+    }
+  } else if (isCapturing) {
+    setStatus('❌ 畫面中找不到人，請重試');
+    isCapturing = false;
+  }
+  ctx.restore();
+}
+
+// ====== 相機啟動與繪圖迴圈 ======
 startBtn.onclick = async () => {
-  setStatus('檢查相機支援...');
-  startBtn.disabled = true; // 防連點
+  setStatus('載入 AI 模組與相機中...');
+  startBtn.disabled = true;
   
   try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('此環境不支援 getUserMedia');
-    }
-
-    setStatus('請求相機權限...');
-    
-    // 降低解析度要求，明確拒絕音訊 (iOS PWA 關鍵)
-    const idealConstraints = {
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 640 }, // 改用 640x480 提高成功率
-        height: { ideal: 480 }
-      },
-      audio: false
-    };
-
+    const idealConstraints = { video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false };
     const fallbackConstraints = { video: true, audio: false };
 
     try {
-      console.log('嘗試後置鏡頭...');
       stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
     } catch (e) {
-      console.log('後置失敗，嘗試任意鏡頭...');
       stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
     }
     
-    // 再次強制設定 iOS 播放屬性
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
     video.muted = true;
@@ -59,56 +83,32 @@ startBtn.onclick = async () => {
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
       
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          capture1Btn.disabled = false;
-          setStatus(`✅ 相機就緒 (${canvas.width}x${canvas.height})`);
-          startBtn.style.display = 'none'; // 啟動成功後隱藏啟動按鈕
-          
-          if (!drawing) {
-            drawing = true;
-            drawLoop();
+      video.play().then(() => {
+        capture1Btn.disabled = false;
+        setStatus('✅ AI 啟動完成，請將鏡頭對準人物');
+        startBtn.style.display = 'none';
+        
+        // 開始將影片幀送給 AI 分析
+        async function detectFrame() {
+          if (video.readyState >= 2) {
+            await pose.send({image: video});
           }
-        }).catch(e => {
-          console.error('播放被阻擋：', e);
-          setStatus('❌ 播放被阻擋，請輕觸畫面重試');
-          startBtn.disabled = false; // 讓使用者可以重試
-          
-          // 加入點擊畫面重試機制
-          document.body.addEventListener('click', function retry() {
-             video.play();
-             document.body.removeEventListener('click', retry);
-          }, { once: true });
-        });
-      }
+          requestAnimationFrame(detectFrame);
+        }
+        detectFrame();
+        
+      }).catch(e => setStatus('❌ 播放被阻擋，請輕觸畫面'));
     };
 
   } catch (err) {
-    console.error('相機錯誤：', err);
-    setStatus(`❌ 錯誤: ${err.name}`);
+    setStatus(`❌ 相機啟動失敗`);
     startBtn.disabled = false;
-    alert(`相機啟動失敗：${err.message}\n\n請確認：\n1. 已在 iOS 設定中允許 Safari/相機權限`);
   }
 };
 
-function drawLoop() {
-  if (video.readyState >= 2 && canvas.width > 0 && canvas.height > 0) {
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  }
-  requestAnimationFrame(drawLoop);
-}
-
 capture1Btn.onclick = () => {
-  if (!canvas.width || !canvas.height) return;
-  
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL('image/png');
-  localStorage.setItem('bgImage', dataUrl);
-  
-  setStatus(`✅ 階段1完成！背景已存`);
-  capture1Btn.textContent = '已拍攝背景';
-  capture1Btn.disabled = true;
+  setStatus('正在分析並鎖定姿勢...');
+  isCapturing = true; // 觸發 onPoseResults 儲存骨架
 };
 
 window.addEventListener('beforeunload', () => {

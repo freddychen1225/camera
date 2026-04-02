@@ -3,16 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PoseGuide PWA - Camera</title>
+  <title>PoseGuide PWA - AI Camera</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
+  
+  <!-- 引入 MediaPipe 套件 -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
   <style>
     body { margin: 0; font-family: sans-serif; background: #000; overflow: hidden; }
     #video, #output { 
       position: fixed; top: 0; left: 0; 
       width: 100vw; height: 100vh; 
       object-fit: cover; 
-      display: none; /* 初始隱藏，app.js 啟動後顯示 */
+      display: none;
     }
     #output { z-index: 1; }
     .btn-container {
@@ -36,15 +43,14 @@
   </style>
 </head>
 <body>
-  <div id="status">準備啟動 (點擊按鈕授權)</div>
+  <div id="status">準備啟動 AI 相機</div>
   
-  <!-- iOS PWA 必須屬性：autoplay, playsinline, webkit-playsinline, muted -->
   <video id="video" autoplay playsinline webkit-playsinline muted></video>
   <canvas id="output"></canvas>
   
   <div class="btn-container">
     <button id="start">啟動相機</button>
-    <button id="capture1" disabled>拍第一張(背景)</button>
+    <button id="capture1" disabled>鎖定完美姿勢</button>
   </div>
 
   <script>
