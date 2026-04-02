@@ -6,12 +6,14 @@
   <title>PoseGuide - AR 攝影師模式</title>
   <link rel="manifest" href="./manifest.json">
   
-  <!-- 引入 TFJS、PoseDetection (骨架) 以及 BodySegmentation (去背) -->
+  <!-- 引入 TFJS 與 MoveNet (處理骨架) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+  
+  <!-- 引入超強前端去背引擎 Img.ly Background Removal -->
+  <script src="https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.3/dist/imglyRemoveBackground.umd.js"></script>
 
   <style>
     body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; color: white; }
@@ -44,7 +46,7 @@
     
     #status { 
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; 
-      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 14px; white-space: nowrap; pointer-events: none;
+      background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px; font-size: 14px; white-space: nowrap; pointer-events: none;
     }
     #flash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: white; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.1s; }
 
@@ -60,8 +62,8 @@
 </head>
 <body>
   <div id="upload-screen">
-    <h1>與偶像同框 AR (攝影師版)</h1>
-    <p id="loading-msg">⏳ 正在下載 骨架與去背 AI 模組...</p>
+    <h1>與偶像同框 AR (高畫質去背)</h1>
+    <p id="loading-msg">⏳ 正在下載 AI 模組...</p>
     <label id="upload-label" style="display:none;">
       選擇偶像照片
       <input type="file" id="file-input" accept="image/*">
