@@ -9,7 +9,7 @@ let stream = null;
 
 startBtn.onclick = async () => {
   try {
-    status.textContent = '請求相機權限...';
+    status.textContent = '請求後置相機權限...';
     stream = await navigator.mediaDevices.getUserMedia({
       video: { 
         facingMode: 'environment',
@@ -21,18 +21,19 @@ startBtn.onclick = async () => {
     startBtn.textContent = '相機運行中';
     startBtn.disabled = true;
     capture1Btn.disabled = false;
-    status.textContent = '相機就緒，拍背景';
+    status.textContent = '後置相機就緒，請拍攝背景場景';
     
     video.onloadedmetadata = () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       canvas.style.display = 'block';
       video.play();
+      status.textContent = `解析度: ${video.videoWidth}x${video.videoHeight} | 拍背景`;
       drawLoop();
     };
   } catch (err) {
-    status.textContent = '相機失敗: ' + err.message;
-    console.error(err);
+    status.textContent = `相機失敗: ${err.name} - ${err.message}`;
+    console.error('Media error:', err);
   }
 };
 
@@ -46,14 +47,16 @@ function drawLoop() {
 capture1Btn.onclick = () => {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const bgDataUrl = canvas.toDataURL('image/png');
-  console.log('背景畫面已擷取! DataURL長度:', bgDataUrl.length);
   localStorage.setItem('bgImage', bgDataUrl);
-  status.textContent = '背景已存 localStorage! 準備階段2';
-  capture1Btn.textContent = '已完成階段1';
+  console.log('✅ 階段1完成! 背景DataURL長度:', bgDataUrl.length);
+  status.textContent = '✅ 背景已存localStorage (階段1完)! 準備階段2 MediaPipe';
+  capture1Btn.textContent = '階段1完成';
   capture1Btn.disabled = true;
 };
 
-// 頁面關閉時停stream
+// 清理stream
 window.onbeforeunload = () => {
-  if (stream) stream.getTracks().forEach(track => track.stop());
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+  }
 };

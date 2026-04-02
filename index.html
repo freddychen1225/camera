@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PoseGuide PWA - Camera</title>
   <link rel="manifest" href="manifest.json">
+  <!-- 內嵌favicon，無404 -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
   <style>
     body { margin: 0; font-family: sans-serif; background: #000; }
     #video, #output { 
@@ -21,11 +23,16 @@
       border-radius: 50px; font-size: 18px; min-width: 120px;
     }
     button:disabled { background: #666; }
-    #status { position: fixed; top: 20px; left: 20px; color: white; z-index: 10; }
+    #status { 
+      position: fixed; top: 20px; left: 20px; 
+      color: white; z-index: 10; 
+      background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
-  <div id="status">準備啟動</div>
+  <div id="status">階段1：準備啟動相機</div>
   <video id="video" autoplay playsinline muted></video>
   <canvas id="output"></canvas>
   <button id="start">啟動相機</button>
