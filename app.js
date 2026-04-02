@@ -1,4 +1,4 @@
-console.log('PoseGuide app.js v14 - 高畫質去背與模型 CDN 修復');
+console.log('PoseGuide app.js v15 - 官方去背引擎 + 邊緣平滑羽化');
 
 const uploadScreen = document.getElementById('upload-screen');
 const loadingMsg = document.getElementById('loading-msg');
@@ -21,12 +21,12 @@ const retryBtn = document.getElementById('retryBtn');
 
 let stream = null;
 let poseDetector = null;
+let segmenter = null;
 let targetPosesList = []; 
 let lastPhotoBlob = null; 
 let isPreviewing = false;
 let isTracking = false;
 
-// 偶像圖片變換參數
 let idolX = 0, idolY = 0, idolScale = 1;
 let isDragging = false;
 let dragStartX = 0, dragStartY = 0;
@@ -39,7 +39,7 @@ const POSE_CONNECTIONS = [
   [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
 ];
 
-// ====== 1. 初始化骨架模型 ======
+// ====== 1. 初始化官方 AI 模組 ======
 async function initTFJS() {
   try {
     await tf.ready();
@@ -47,46 +47,80 @@ async function initTFJS() {
       modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
       enableTracking: true, trackerType: poseDetection.TrackerType.BoundingBox
     });
+    segmenter = await bodySegmentation.createSegmenter(bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation, {
+      runtime: 'tfjs', modelType: 'general'
+    });
+    
     loadingMsg.style.display = 'none'; uploadLabel.style.display = 'block';
   } catch (error) { loadingMsg.textContent = '❌ AI 載入失敗'; console.error(error); }
 }
 initTFJS();
 
-// ====== 2. 超高畫質去背 (Img.ly) ======
-fileInput.onchange = async (e) => {
+// ====== 2. 照片上傳：自動去背 + 【邊緣羽化平滑】 ======
+fileInput.onchange = (e) => {
   const file = e.target.files[0];
   if (!file) return;
   
-  setStatus('啟動精準去背魔法 (首次需下載模型，請稍候)...');
-  uploadScreen.style.display = 'none'; cancelBtn.style.display = 'block';
+  const tempImg = new Image();
+  tempImg.src = URL.createObjectURL(file);
   
-  try {
-    // 呼叫 imgly 去背引擎，並強制指定模型 CDN 來源
-    const imageBlob = await imglyRemoveBackground(file, {
-      // 確保跨域下載模型檔案不會失敗
-      publicPath: 'https://unpkg.com/@imgly/background-removal@1.4.3/dist/',
-      model: 'isnet_fp16', // 使用輕量快速版模型 (約 40MB)
-      progress: (key, current, total) => {
-        const percent = Math.round((current / total) * 100);
-        setStatus(`去背中: ${percent}% (首次下載可能需 10~30 秒)`);
-      }
-    });
-
-    const url = URL.createObjectURL(imageBlob);
-    idolImg.src = url;
+  tempImg.onload = async () => {
+    setStatus('1/2 正在自動去背 (含邊緣平滑處理)...');
+    uploadScreen.style.display = 'none'; cancelBtn.style.display = 'block';
     
-    idolImg.onload = async () => {
-      setStatus('擷取偶像姿勢中...');
-      const poses = await poseDetector.estimatePoses(idolImg);
-      if (poses.length > 0) {
-        targetPosesList = poses;
-        startCamera();
-      } else {
-        setStatus('❌ 找不到人像骨架，請換一張全身照片'); setTimeout(resetApp, 2000);
-      }
-    };
-  } catch (err) {
-    setStatus('❌ 去背失敗，請確保有網路連線'); console.error(err); setTimeout(resetApp, 2000);
+    try {
+      // 1. 取得人物遮罩
+      const segmentation = await segmenter.segmentPeople(tempImg);
+      const fgColor = {r: 255, g: 255, b: 255, a: 255}; // 人物變白
+      const bgColor = {r: 0, g: 0, b: 0, a: 0};         // 背景變黑
+      const maskData = await bodySegmentation.toBinaryMask(segmentation, fgColor, bgColor);
+      
+      // 2. 準備遮罩 Canvas
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = tempImg.width; maskCanvas.height = tempImg.height;
+      const maskCtx = maskCanvas.getContext('2d');
+      maskCtx.putImageData(maskData, 0, 0);
+
+      // 3. 邊緣羽化 (Feathering) 的魔法
+      // 我們把硬梆梆的遮罩稍微縮小一點點，然後加上高斯模糊
+      const featherCanvas = document.createElement('canvas');
+      featherCanvas.width = tempImg.width; featherCanvas.height = tempImg.height;
+      const featherCtx = featherCanvas.getContext('2d');
+      
+      featherCtx.filter = 'blur(4px)'; // 模糊半徑 4px 讓邊緣變軟
+      featherCtx.drawImage(maskCanvas, 0, 0);
+      featherCtx.filter = 'none';
+
+      // 4. 最終合成：把原圖跟「羽化後的遮罩」交集
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = tempImg.width; finalCanvas.height = tempImg.height;
+      const finalCtx = finalCanvas.getContext('2d');
+      
+      // 先畫遮罩
+      finalCtx.drawImage(featherCanvas, 0, 0);
+      // 利用 source-in 模式，只保留遮罩範圍內的原圖，且繼承邊緣的半透明模糊
+      finalCtx.globalCompositeOperation = 'source-in';
+      finalCtx.drawImage(tempImg, 0, 0);
+      finalCtx.globalCompositeOperation = 'source-over'; // 恢復預設
+      
+      // 5. 設定給 idolImg
+      idolImg.src = finalCanvas.toDataURL('image/png');
+    } catch(err) {
+      setStatus('❌ 去背過程發生錯誤'); console.error(err);
+    }
+  };
+};
+
+idolImg.onload = async () => {
+  if(!idolImg.src.startsWith('data:')) return; 
+  setStatus('2/2 提取偶像姿勢...');
+  
+  const poses = await poseDetector.estimatePoses(idolImg);
+  if (poses.length > 0) {
+    targetPosesList = poses;
+    startCamera();
+  } else {
+    setStatus('❌ 找不到人像骨架，請重選'); setTimeout(resetApp, 2000);
   }
 };
 
@@ -162,7 +196,7 @@ async function renderLoop() {
   // 1. 底層相機
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // 2. 表層偶像 (去背圖)
+  // 2. 表層偶像 (加上了羽化去背，85% 透明度方便對位)
   ctx.save();
   ctx.translate(idolX, idolY); ctx.scale(idolScale, idolScale);
   ctx.globalAlpha = 0.85; 
