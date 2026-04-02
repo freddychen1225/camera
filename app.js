@@ -6,57 +6,91 @@ const capture1Btn = document.getElementById('capture1');
 const status = document.getElementById('status');
 
 let stream = null;
+let drawing = false;
+
+function setStatus(msg) {
+  status.textContent = msg;
+  console.log(msg);
+}
 
 startBtn.onclick = async () => {
   try {
-    status.textContent = '請求後置相機權限...';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('此瀏覽器不支援相機');
+      return;
+    }
+
+    setStatus('請求相機權限中...');
+
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { 
-        facingMode: 'environment',
+      video: {
+        facingMode: { ideal: 'environment' },
         width: { ideal: 1280 },
         height: { ideal: 720 }
-      }
+      },
+      audio: false
     });
+
     video.srcObject = stream;
-    startBtn.textContent = '相機運行中';
-    startBtn.disabled = true;
-    capture1Btn.disabled = false;
-    status.textContent = '後置相機就緒，請拍攝背景場景';
-    
-    video.onloadedmetadata = () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.style.display = 'block';
-      video.play();
-      status.textContent = `解析度: ${video.videoWidth}x${video.videoHeight} | 拍背景`;
-      drawLoop();
+    video.setAttribute('playsinline', '');
+    video.setAttribute('autoplay', '');
+    video.muted = true;
+    video.style.display = 'block';
+    canvas.style.display = 'block';
+
+    video.onloadedmetadata = async () => {
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+
+      try {
+        await video.play();
+      } catch (e) {
+        console.error(e);
+      }
+
+      startBtn.textContent = '相機運行中';
+      startBtn.disabled = true;
+      capture1Btn.disabled = false;
+
+      setStatus(`相機就緒 ${canvas.width} x ${canvas.height}`);
+      if (!drawing) {
+        drawing = true;
+        drawLoop();
+      }
     };
+
   } catch (err) {
-    status.textContent = `相機失敗: ${err.name} - ${err.message}`;
-    console.error('Media error:', err);
+    console.error(err);
+    setStatus(`相機失敗：${err.name} / ${err.message}`);
+    alert(`相機失敗：${err.name}\n${err.message}`);
   }
 };
 
 function drawLoop() {
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+  if (video.readyState >= 2 && canvas.width > 0 && canvas.height > 0) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   }
   requestAnimationFrame(drawLoop);
 }
 
 capture1Btn.onclick = () => {
+  if (!canvas.width || !canvas.height) {
+    setStatus('尚未取得相機畫面');
+    return;
+  }
+
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const bgDataUrl = canvas.toDataURL('image/png');
   localStorage.setItem('bgImage', bgDataUrl);
-  console.log('✅ 階段1完成! 背景DataURL長度:', bgDataUrl.length);
-  status.textContent = '✅ 背景已存localStorage (階段1完)! 準備階段2 MediaPipe';
+
+  console.log('背景已存，長度：', bgDataUrl.length);
+  setStatus('✅ 背景已存 localStorage');
   capture1Btn.textContent = '階段1完成';
   capture1Btn.disabled = true;
 };
 
-// 清理stream
-window.onbeforeunload = () => {
+window.addEventListener('beforeunload', () => {
   if (stream) {
     stream.getTracks().forEach(track => track.stop());
   }
-};
+});
