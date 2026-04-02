@@ -2,7 +2,7 @@
   "name": "PoseGuide PWA",
   "short_name": "PoseGuide",
   "description": "AI拍照姿態引導PWA",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#007bff"

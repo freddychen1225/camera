@@ -1,9 +1,9 @@
-const CACHE_NAME = 'poseguide-stage1-v2';
+const CACHE_NAME = 'poseguide-stage1-v3'; // 升級版本號破壞舊快取
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/manifest.json'
+  './',
+  './index.html',
+  './app.js',
+  './manifest.json'
 ];
 
 self.addEventListener('install', event => {
@@ -18,7 +18,7 @@ self.addEventListener('fetch', event => {
     caches.match(event.request)
       .then(response => {
         if (response) return response;
-        return fetch(event.request).catch(() => caches.match('/index.html'));
+        return fetch(event.request).catch(() => caches.match('./index.html'));
       })
   );
 });
