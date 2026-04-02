@@ -1,7 +1,4 @@
-// 引入新版 MediaPipe Tasks
-import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
-
-console.log('PoseGuide app.js v8 - 多人追蹤與 iOS 儲存修復');
+console.log('PoseGuide app.js v9 - 切換為 TFJS MoveNet 多人模式');
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('output');
@@ -19,206 +16,57 @@ const saveBtn = document.getElementById('saveBtn');
 const retryBtn = document.getElementById('retryBtn');
 
 let stream = null;
-let poseLandmarker = null;
-let runningMode = "VIDEO";
-let targetLandmarksList = []; // 改為陣列，存儲多人的骨架
+let detector = null;
+let targetPosesList = []; 
 let isCapturing = false;
 let mode = 'scan'; 
-let lastPhotoBlob = null; // 用 Blob 儲存給 iOS 分享用
+let lastPhotoBlob = null; 
 let isPreviewing = false;
-let lastVideoTime = -1;
 
 function setStatus(msg) { status.textContent = msg; }
 
-// ====== 初始化新版 MediaPipe (支援多人) ======
-async function createPoseLandmarker() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-  );
-  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-      delegate: "GPU"
-    },
-    runningMode: runningMode,
-    numPoses: 3 // 🔥 這裡設定最高同時追蹤 3 個人！
-  });
-  
-  startBtn.disabled = false;
-  startBtn.textContent = '啟動相機';
-  setStatus('✅ AI 載入完成，請點擊啟動');
-}
-createPoseLandmarker();
+// MoveNet 骨架連線定義 (17個點)
+const POSE_CONNECTIONS = [
+  [0, 1], [0, 2], [1, 3], [2, 4], [0, 5], [0, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+  [5, 6], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
+];
 
-// ====== 處理螢幕旋轉防縮放 ======
+// ====== 1. 載入 MoveNet MultiPose ======
+async function initTFJS() {
+  try {
+    await tf.ready();
+    const detectorConfig = {
+      modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+      enableTracking: true,
+      trackerType: poseDetection.TrackerType.BoundingBox
+    };
+    detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, detectorConfig);
+    
+    startBtn.disabled = false;
+    startBtn.textContent = '啟動相機';
+    setStatus('✅ AI 載入完成，請點擊啟動');
+  } catch (error) {
+    console.error(error);
+    setStatus('❌ AI 載入失敗');
+  }
+}
+initTFJS();
+
+// ====== 2. 處理畫布與攝影機 ======
 function resizeCanvas() {
   if (video.videoWidth > 0) {
-    // 確保 canvas 始終與影片真實比例一致
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
   }
 }
 window.addEventListener('resize', resizeCanvas);
-window.addEventListener('orientationchange', () => {
-  setTimeout(resizeCanvas, 300); // 延遲等待 iOS 轉向完成
-});
+window.addEventListener('orientationchange', () => { setTimeout(resizeCanvas, 300); });
 
-// ====== 計算匹配度 ======
-// 現在會算出畫面上的人與「所有」目標線的最短距離
-function calculateMatchScore(currentLandmarks, targetsList) {
-  if (targetsList.length === 0) return 0;
-  
-  let bestScore = 0;
-  // 這個人會去跟目標裡的每一個人比對，看跟誰最像
-  for(let target of targetsList) {
-    let totalDist = 0;
-    for(let i=0; i<33; i++) {
-      let dx = currentLandmarks[i].x - target[i].x;
-      let dy = currentLandmarks[i].y - target[i].y;
-      totalDist += Math.sqrt(dx*dx + dy*dy);
-    }
-    let score = Math.max(0, 100 - ((totalDist / 33) * 300));
-    if (score > bestScore) bestScore = score;
-  }
-  return bestScore;
-}
-
-// ====== iOS 儲存相片 (Web Share API) ======
-async function takePhoto() {
-  if (isPreviewing) return; 
-  isPreviewing = true;
-  
-  flash.style.opacity = '1';
-  setTimeout(() => flash.style.opacity = '0', 150);
-  
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = video.videoWidth;
-  tempCanvas.height = video.videoHeight;
-  tempCanvas.getContext('2d').drawImage(video, 0, 0);
-  
-  // 為了 iOS Share API，我們需要轉成 Blob
-  tempCanvas.toBlob((blob) => {
-    lastPhotoBlob = blob;
-    const url = URL.createObjectURL(blob);
-    previewImg.src = url;
-    previewModal.style.display = 'flex';
-    setStatus('📸 拍照成功！');
-  }, 'image/jpeg', 1.0);
-}
-
-saveBtn.onclick = async () => {
-  const file = new File([lastPhotoBlob], `PoseGuide_${Date.now()}.jpg`, { type: 'image/jpeg' });
-  
-  // 🔥 iOS 專用：呼叫原生分享面板，裡面會有「儲存影像」
-  if (navigator.share && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: 'PoseGuide 完美照片',
-      });
-      setStatus('✅ 已呼叫儲存/分享');
-    } catch (err) {
-      console.log('分享取消或失敗', err);
-    }
-  } else {
-    // 備用方案 (PC 或不支援的環境)
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(lastPhotoBlob);
-    link.download = file.name;
-    link.click();
-    setStatus('✅ 照片已下載');
-  }
-  closePreview();
-};
-
-retryBtn.onclick = () => {
-  closePreview();
-  setStatus('繼續引導中...');
-};
-
-function closePreview() {
-  previewModal.style.display = 'none';
-  setTimeout(() => { isPreviewing = false; }, 1000); 
-}
-
-// ====== 繪圖與偵測迴圈 ======
-// 連結輔助線 (新版常數)
-const POSE_CONNECTIONS = [
-  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10], [11, 12], [11, 13], [13, 15], [15, 17], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32]
-];
-
-async function renderLoop() {
-  if (!isPreviewing && video.readyState >= 2) {
-    // 檢查影片是否更新
-    let startTimeMs = performance.now();
-    if (lastVideoTime !== video.currentTime) {
-      lastVideoTime = video.currentTime;
-      // 進行 AI 偵測
-      const poseLandmarkerResult = poseLandmarker.detectForVideo(video, startTimeMs);
-      
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // 畫出目標黃線 (多人)
-      if (mode === 'guide' && targetLandmarksList.length > 0) {
-        targetLandmarksList.forEach(target => {
-          drawConnectors(ctx, target, POSE_CONNECTIONS, {color: 'rgba(255, 215, 0, 0.6)', lineWidth: 5});
-        });
-      }
-
-      // 如果有偵測到人
-      if (poseLandmarkerResult.landmarks) {
-        
-        if (isCapturing) {
-          // 鎖定當下畫面上「所有人」的姿勢
-          targetLandmarksList = JSON.parse(JSON.stringify(poseLandmarkerResult.landmarks));
-          setStatus(`✅ 已鎖定 ${targetLandmarksList.length} 人的姿勢！請按引導模式`);
-          capture1Btn.style.display = 'none';
-          guideBtn.style.display = 'block';
-          isCapturing = false;
-        }
-
-        let totalScore = 0;
-        let peopleCount = poseLandmarkerResult.landmarks.length;
-
-        for (const landmark of poseLandmarkerResult.landmarks) {
-          drawConnectors(ctx, landmark, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
-          
-          if (mode === 'guide' && targetLandmarksList.length > 0) {
-            totalScore += calculateMatchScore(landmark, targetLandmarksList);
-          }
-        }
-
-        // 計算平均匹配度
-        if (mode === 'guide' && targetLandmarksList.length > 0 && peopleCount > 0) {
-          let finalScore = totalScore / peopleCount;
-          matchScoreDiv.innerText = `匹配度: ${finalScore.toFixed(0)}%`;
-          
-          if (finalScore >= 85) {
-            matchScoreDiv.style.background = 'rgba(40,167,69,0.9)';
-            takePhoto();
-          } else {
-            matchScoreDiv.style.background = 'rgba(255,165,0,0.8)';
-          }
-        }
-      }
-      ctx.restore();
-    }
-  }
-  requestAnimationFrame(renderLoop);
-}
-
-// ====== 相機啟動 ======
 startBtn.onclick = async () => {
   setStatus('載入相機...');
   startBtn.disabled = true;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment' }, 
-      audio: false 
-    });
-    
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', ''); video.muted = true;
     video.srcObject = stream; video.style.display = 'block'; canvas.style.display = 'block';
     
@@ -228,16 +76,165 @@ startBtn.onclick = async () => {
         capture1Btn.disabled = false; 
         setStatus('✅ 對準人物，按下鎖定背景');
         startBtn.style.display = 'none';
-        renderLoop(); // 啟動繪圖與偵測迴圈
+        renderLoop(); 
       });
     };
-  } catch (err) { setStatus(`❌ 失敗: ${err.name}`); }
+  } catch (err) { setStatus(`❌ 相機失敗: ${err.name}`); }
 };
+
+// ====== 3. 手動繪製骨架 ======
+function drawKeypointsAndBones(keypoints, color, lineWidth) {
+  // 畫點
+  ctx.fillStyle = color;
+  for (let kp of keypoints) {
+    if (kp.score > 0.3) {
+      ctx.beginPath();
+      ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+  // 畫線
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  for (let [i, j] of POSE_CONNECTIONS) {
+    const kp1 = keypoints[i];
+    const kp2 = keypoints[j];
+    if (kp1.score > 0.3 && kp2.score > 0.3) {
+      ctx.beginPath();
+      ctx.moveTo(kp1.x, kp1.y);
+      ctx.lineTo(kp2.x, kp2.y);
+      ctx.stroke();
+    }
+  }
+}
+
+// ====== 4. 相似度計算 ======
+function calculateMatchScore(currentKps, targetPoses) {
+  if (targetPoses.length === 0) return 0;
+  let bestScore = 0;
+  
+  for(let targetPose of targetPoses) {
+    let totalDist = 0;
+    let validPoints = 0;
+    
+    for(let i=0; i<17; i++) {
+      if(currentKps[i].score > 0.3 && targetPose.keypoints[i].score > 0.3) {
+        let dx = currentKps[i].x - targetPose.keypoints[i].x;
+        let dy = currentKps[i].y - targetPose.keypoints[i].y;
+        totalDist += Math.sqrt(dx*dx + dy*dy);
+        validPoints++;
+      }
+    }
+    
+    if (validPoints > 5) {
+      let score = Math.max(0, 100 - ((totalDist / validPoints) / 5)); // 根據畫素誤差微調分母(5)
+      if (score > bestScore) bestScore = score;
+    }
+  }
+  return bestScore;
+}
+
+// ====== 5. 偵測與繪圖迴圈 ======
+async function renderLoop() {
+  if (!isPreviewing && video.readyState >= 2) {
+    
+    // 取得所有偵測到的人 (最大 6 人)
+    const poses = await detector.estimatePoses(video);
+    
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 畫背景
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // 畫目標黃線
+    if (mode === 'guide' && targetPosesList.length > 0) {
+      targetPosesList.forEach(targetPose => {
+        drawKeypointsAndBones(targetPose.keypoints, 'rgba(255, 215, 0, 0.6)', 5);
+      });
+    }
+
+    if (poses && poses.length > 0) {
+      
+      // 鎖定當下所有人的姿勢
+      if (isCapturing) {
+        targetPosesList = JSON.parse(JSON.stringify(poses));
+        setStatus(`✅ 已鎖定 ${targetPosesList.length} 人的姿勢！`);
+        capture1Btn.style.display = 'none';
+        guideBtn.style.display = 'block';
+        isCapturing = false;
+      }
+
+      let totalScore = 0;
+      let validPeopleCount = 0;
+
+      for (const pose of poses) {
+        // 只繪製可信度高的人
+        if (pose.score > 0.2) {
+          drawKeypointsAndBones(pose.keypoints, '#00FF00', 3);
+          
+          if (mode === 'guide' && targetPosesList.length > 0) {
+            totalScore += calculateMatchScore(pose.keypoints, targetPosesList);
+            validPeopleCount++;
+          }
+        }
+      }
+
+      // 計算平均匹配度並觸發拍照
+      if (mode === 'guide' && targetPosesList.length > 0 && validPeopleCount > 0) {
+        let finalScore = totalScore / validPeopleCount;
+        matchScoreDiv.innerText = `匹配度: ${finalScore.toFixed(0)}%`;
+        
+        if (finalScore >= 80) { // 稍微放寬門檻到 80，因為 TFJS 算分方式不同
+          matchScoreDiv.style.background = 'rgba(40,167,69,0.9)';
+          takePhoto();
+        } else {
+          matchScoreDiv.style.background = 'rgba(255,165,0,0.8)';
+        }
+      }
+    }
+    ctx.restore();
+  }
+  // 持續執行
+  requestAnimationFrame(renderLoop);
+}
+
+// ====== 6. 拍照與儲存 ======
+async function takePhoto() {
+  if (isPreviewing) return; 
+  isPreviewing = true;
+  flash.style.opacity = '1';
+  setTimeout(() => flash.style.opacity = '0', 150);
+  
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = video.videoWidth; tempCanvas.height = video.videoHeight;
+  tempCanvas.getContext('2d').drawImage(video, 0, 0);
+  
+  tempCanvas.toBlob((blob) => {
+    lastPhotoBlob = blob;
+    previewImg.src = URL.createObjectURL(blob);
+    previewModal.style.display = 'flex';
+    setStatus('📸 拍照成功！');
+  }, 'image/jpeg', 1.0);
+}
+
+saveBtn.onclick = async () => {
+  const file = new File([lastPhotoBlob], `PoseGuide_${Date.now()}.jpg`, { type: 'image/jpeg' });
+  if (navigator.share && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'PoseGuide' });
+      setStatus('✅ 已儲存');
+    } catch (err) {}
+  } else {
+    const link = document.createElement('a'); link.href = URL.createObjectURL(lastPhotoBlob); link.download = file.name; link.click();
+  }
+  closePreview();
+};
+
+retryBtn.onclick = () => { closePreview(); setStatus('繼續引導中...'); };
+function closePreview() { previewModal.style.display = 'none'; setTimeout(() => { isPreviewing = false; }, 1000); }
 
 capture1Btn.onclick = () => { isCapturing = true; };
 guideBtn.onclick = () => {
-  mode = 'guide';
-  guideBtn.style.display = 'none';
-  matchScoreDiv.style.display = 'block';
+  mode = 'guide'; guideBtn.style.display = 'none'; matchScoreDiv.style.display = 'block';
   setStatus('請換人站進黃色虛擬線內');
 };

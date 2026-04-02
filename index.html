@@ -2,20 +2,19 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <!-- 修正 iOS 旋轉放大的 viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PoseGuide PWA - 姿態引導</title>
+  <title>PoseGuide PWA - 多人引導</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
   
-  <!-- 引入最新版 MediaPipe Tasks Vision (支援多人) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
-  <!-- 繪圖輔助 -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <!-- 引入 TensorFlow.js 和 Pose Detection 模組 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
 
   <style>
     body { margin: 0; font-family: sans-serif; background: #000; overflow: hidden; }
-    /* 用 100vw/vh 防止旋轉變形 */
     #video, #output { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; display: none; }
     #output { z-index: 1; }
     
@@ -46,23 +45,19 @@
       background: white; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.1s;
     }
 
-    /* ==== 照片預覽視窗 ==== */
     #preview-modal {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background: rgba(0,0,0,0.9); z-index: 10000; display: none;
       flex-direction: column; align-items: center; justify-content: center;
     }
-    #preview-img {
-      max-width: 90%; max-height: 70vh; border: 3px solid white; border-radius: 10px;
-      object-fit: contain;
-    }
+    #preview-img { max-width: 90%; max-height: 70vh; border: 3px solid white; border-radius: 10px; object-fit: contain; }
     .preview-btns { margin-top: 20px; display: flex; gap: 20px; }
     #saveBtn { background: #28a745; padding: 15px 30px; font-size: 18px; }
     #retryBtn { background: #dc3545; padding: 15px 30px; font-size: 18px; }
   </style>
 </head>
 <body>
-  <div id="status">正在下載 AI 模組 (約需幾秒)...</div>
+  <div id="status">正在下載 TFJS MoveNet 多人模組...</div>
   <div id="match-score">匹配度: 0%</div>
   <div id="flash"></div>
   
@@ -70,12 +65,11 @@
   <canvas id="output"></canvas>
   
   <div class="btn-container">
-    <button id="start" disabled>等待 AI 載入...</button>
+    <button id="start" disabled>等待載入...</button>
     <button id="capture1" disabled>鎖定背景與姿勢</button>
     <button id="guideBtn">進入引導模式</button>
   </div>
 
-  <!-- 照片預覽彈窗 -->
   <div id="preview-modal">
     <img id="preview-img" src="" alt="Photo Preview">
     <div class="preview-btns">
@@ -87,7 +81,7 @@
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.error);
   </script>
-  <!-- 必須改為 type="module" 因為新版使用 ES Modules -->
-  <script type="module" src="./app.js"></script>
+  <!-- 注意：改回一般的 script，不再使用 module -->
+  <script src="./app.js"></script>
 </body>
 </html>
