@@ -2,46 +2,56 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>PoseGuide PWA - Camera</title>
   <link rel="manifest" href="./manifest.json">
-  <!-- 內嵌favicon，無404 -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' fill='%23007bff'>📸</text></svg>">
   <style>
-    body { margin: 0; font-family: sans-serif; background: #000; }
+    body { margin: 0; font-family: sans-serif; background: #000; overflow: hidden; }
     #video, #output { 
       position: fixed; top: 0; left: 0; 
       width: 100vw; height: 100vh; 
       object-fit: cover; 
+      display: none; /* 初始隱藏，app.js 啟動後顯示 */
     }
     #output { z-index: 1; }
-    button { 
+    .btn-container {
       position: fixed; z-index: 10; 
-      bottom: 30px; left: 50%; transform: translateX(-50%);
-      padding: 15px 40px; margin: 10px; 
-      background: #007bff; color: white; border: none; 
-      border-radius: 50px; font-size: 18px; min-width: 120px;
+      bottom: 30px; left: 0; width: 100%;
+      display: flex; justify-content: center; gap: 10px;
     }
-    button:disabled { background: #666; }
+    button { 
+      padding: 15px 25px; 
+      background: #007bff; color: white; border: none; 
+      border-radius: 50px; font-size: 16px; font-weight: bold;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    button:disabled { background: #555; color: #999; }
     #status { 
-      position: fixed; top: 20px; left: 20px; 
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
       color: white; z-index: 10; 
-      background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;
-      font-size: 14px;
+      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px;
+      font-size: 14px; white-space: nowrap; pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <div id="status">階段1：準備啟動相機</div>
-  <video id="video" autoplay playsinline muted></video>
+  <div id="status">準備啟動 (點擊按鈕授權)</div>
+  
+  <!-- iOS PWA 必須屬性：autoplay, playsinline, webkit-playsinline, muted -->
+  <video id="video" autoplay playsinline webkit-playsinline muted></video>
   <canvas id="output"></canvas>
-  <button id="start">啟動相機</button>
-  <button id="capture1" disabled>拍第一張（背景）</button>
+  
+  <div class="btn-container">
+    <button id="start">啟動相機</button>
+    <button id="capture1" disabled>拍第一張(背景)</button>
+  </div>
+
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(console.error);
+      navigator.serviceWorker.register('./sw.js').catch(console.error);
     }
   </script>
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

@@ -1,6 +1,5 @@
-console.log('PoseGuide app.js v3 載入！(修正相機 NotFound)');
+console.log('PoseGuide app.js v4 載入！(強化 iOS PWA 相容性)');
 
-// DOM元素
 const video = document.getElementById('video');
 const canvas = document.getElementById('output');
 const ctx = canvas.getContext('2d');
@@ -13,79 +12,83 @@ let drawing = false;
 
 function setStatus(msg) {
   status.textContent = msg;
-  console.log(msg);
+  console.log('狀態:', msg);
 }
 
-// 初始化按鈕狀態
-startBtn.textContent = '啟動相機';
 startBtn.onclick = async () => {
-  console.log('啟動相機按鈕點擊');
+  setStatus('檢查相機支援...');
+  startBtn.disabled = true; // 防連點
+  
   try {
-    setStatus('檢查瀏覽器支援...');
-    
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('此瀏覽器不支援 getUserMedia 相機 API');
+      throw new Error('此環境不支援 getUserMedia');
     }
 
-    setStatus('請求相機權限中...');
+    setStatus('請求相機權限...');
     
-    // 優先請求：後置鏡頭、高解析度
+    // 降低解析度要求，明確拒絕音訊 (iOS PWA 關鍵)
     const idealConstraints = {
       video: {
         facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
+        width: { ideal: 640 }, // 改用 640x480 提高成功率
+        height: { ideal: 480 }
+      },
+      audio: false
     };
 
-    // 退一步請求：不挑鏡頭、不挑解析度 (PC 通常會走這條)
-    const fallbackConstraints = {
-      video: true
-    };
+    const fallbackConstraints = { video: true, audio: false };
 
     try {
-      console.log('嘗試請求後置高解析度相機...');
+      console.log('嘗試後置鏡頭...');
       stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
     } catch (e) {
-      console.log('後置相機失敗，嘗試抓取任何可用相機...');
+      console.log('後置失敗，嘗試任意鏡頭...');
       stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
     }
-
-    console.log('stream 取得成功，track 數：', stream.getVideoTracks().length);
     
-    video.srcObject = stream;
-    video.setAttribute('playsinline', ''); // iOS 必須
+    // 再次強制設定 iOS 播放屬性
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
     video.muted = true;
+    video.srcObject = stream;
     
-    // 將 video 和 canvas 顯示出來
     video.style.display = 'block';
     canvas.style.display = 'block';
     
     video.onloadedmetadata = () => {
-      console.log('video metadata 就緒：', video.videoWidth, 'x', video.videoHeight);
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
       
-      // 確保 canvas 尺寸與影片相符
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-      
-      video.play().then(() => {
-        startBtn.disabled = true;
-        capture1Btn.disabled = false;
-        setStatus(`✅ 相機就緒 (${canvas.width}x${canvas.height})`);
-        
-        if (!drawing) {
-          drawing = true;
-          drawLoop();
-        }
-      }).catch(e => {
-        console.error('video.play() 失敗：', e);
-        setStatus('❌ 播放失敗：' + e.message);
-      });
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          capture1Btn.disabled = false;
+          setStatus(`✅ 相機就緒 (${canvas.width}x${canvas.height})`);
+          startBtn.style.display = 'none'; // 啟動成功後隱藏啟動按鈕
+          
+          if (!drawing) {
+            drawing = true;
+            drawLoop();
+          }
+        }).catch(e => {
+          console.error('播放被阻擋：', e);
+          setStatus('❌ 播放被阻擋，請輕觸畫面重試');
+          startBtn.disabled = false; // 讓使用者可以重試
+          
+          // 加入點擊畫面重試機制
+          document.body.addEventListener('click', function retry() {
+             video.play();
+             document.body.removeEventListener('click', retry);
+          }, { once: true });
+        });
+      }
     };
 
   } catch (err) {
-    console.error('getUserMedia 最終錯誤：', err);
-    setStatus('❌ 相機錯誤：' + err.name + ' - ' + err.message);
+    console.error('相機錯誤：', err);
+    setStatus(`❌ 錯誤: ${err.name}`);
+    startBtn.disabled = false;
+    alert(`相機啟動失敗：${err.message}\n\n請確認：\n1. 已在 iOS 設定中允許 Safari/相機權限`);
   }
 };
 
@@ -97,28 +100,17 @@ function drawLoop() {
 }
 
 capture1Btn.onclick = () => {
-  if (!canvas.width || !canvas.height) {
-    setStatus('尚未取得相機畫面');
-    return;
-  }
-
-  // 將當前畫面畫到 canvas 上
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  if (!canvas.width || !canvas.height) return;
   
-  // 轉成 Base64 字串存入 localStorage
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/png');
   localStorage.setItem('bgImage', dataUrl);
   
-  console.log('背景截圖已存，長度：', dataUrl.length);
-  setStatus('✅ 階段 1 完成！背景已存');
-  
-  capture1Btn.textContent = '階段 1 完成';
+  setStatus(`✅ 階段1完成！背景已存`);
+  capture1Btn.textContent = '已拍攝背景';
   capture1Btn.disabled = true;
 };
 
-// 頁面關閉時停止相機
 window.addEventListener('beforeunload', () => {
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-  }
+  if (stream) stream.getTracks().forEach(t => t.stop());
 });
