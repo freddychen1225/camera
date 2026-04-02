@@ -14,10 +14,10 @@
 
   <style>
     body { margin: 0; font-family: sans-serif; background: #111; overflow: hidden; color: white; }
-    #video, #output { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; display: none; }
-    #output { z-index: 1; }
+    /* 改用 contain 避免拖曳座標產生視覺誤差 */
+    #video, #output { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; display: none; }
+    #output { z-index: 1; touch-action: none; /* 防止滑動網頁 */ }
     
-    /* 上傳照片專區 */
     #upload-screen {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 20;
       display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -29,8 +29,6 @@
       font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     input[type="file"] { display: none; }
-    
-    /* 隱藏的原圖 Image 元件 (供 Canvas 繪圖用) */
     #idol-img { display: none; }
 
     .btn-container {
@@ -38,23 +36,23 @@
       display: flex; justify-content: center; gap: 15px; padding: 0 15px; box-sizing: border-box;
     }
     button { 
-      padding: 12px 20px; background: #dc3545; color: white; border: none; 
-      border-radius: 50px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      padding: 15px 25px; background: #007bff; color: white; border: none; 
+      border-radius: 50px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
-    #guideBtn { background: #28a745; display: none; }
+    #takePhotoBtn { background: #e83e8c; display: none; }
+    #cancelBtn { background: #6c757d; display: none; }
     
     #status { 
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; 
-      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 14px;
+      background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px; font-size: 14px; white-space: nowrap; pointer-events: none;
     }
-    #match-score {
-      position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 10; 
-      background: rgba(255,165,0,0.8); padding: 8px 16px; border-radius: 20px; font-size: 16px; font-weight: bold; display: none;
+    
+    #countdown {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 15;
+      font-size: 150px; font-weight: bold; color: white; text-shadow: 0 0 20px #e83e8c; display: none; pointer-events: none;
     }
-    #flash {
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      background: white; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.1s;
-    }
+
+    #flash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: white; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.1s; }
 
     #preview-modal {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.9); z-index: 10000; 
@@ -67,18 +65,17 @@
   </style>
 </head>
 <body>
-  <!-- 首頁：上傳照片 -->
   <div id="upload-screen">
     <h1>與偶像同框 AR</h1>
     <p id="loading-msg">⏳ 正在下載 AI 模組...</p>
     <label id="upload-label" style="display:none;">
-      選擇照片 / 拍照
+      選擇偶像照片
       <input type="file" id="file-input" accept="image/*">
     </label>
   </div>
 
   <div id="status" style="display:none;">載入中...</div>
-  <div id="match-score">匹配度: 0%</div>
+  <div id="countdown">3</div>
   <div id="flash"></div>
   
   <img id="idol-img" crossorigin="anonymous">
@@ -86,13 +83,14 @@
   <canvas id="output"></canvas>
   
   <div class="btn-container">
-    <button id="cancelBtn" style="display:none;">取消重選</button>
+    <button id="cancelBtn">重選照片</button>
+    <button id="takePhotoBtn">📸 拍照 (3秒)</button>
   </div>
 
   <div id="preview-modal">
     <img id="preview-img" src="" alt="Photo Preview">
     <div class="preview-btns">
-      <button id="retryBtn">重拍</button>
+      <button id="retryBtn">取消</button>
       <button id="saveBtn">儲存合成照</button>
     </div>
   </div>
